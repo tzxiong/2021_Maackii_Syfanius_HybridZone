@@ -1,0 +1,483 @@
+initialize() {
+	
+	initializeSLiMModelType("nonWF");
+	
+	// working directory
+	if (!exists("dir")) {defineConstant("dir", "/WORKING_DIR");}
+	// source directory (for loading .tree files, usually for burn-in)
+	if (!exists("dir_source")) {defineConstant("dir_source", "/WORKING_DIR");}
+	
+	//	setSeed(1696611580820); // force the model to use a particular seed
+	
+	// chromosome length
+	if (!exists("L_chr")) {defineConstant("L_chr",asInteger(1e6));}
+	// number of chromosomes
+	if (!exists("n_chr")) {defineConstant("n_chr",10);}
+	// total genome length
+	if (!exists("L")) {defineConstant("L",asInteger(L_chr * n_chr));}
+	// reproduction rate (lambda: Expected offspring number per reproducing individual)
+	if (!exists("lambda")) {defineConstant("lambda",1.5);}
+	// density-regulation factor
+	if (!exists("K")) {defineConstant("K",4000);}
+	// migration probability
+	if (!exists("m")) {defineConstant("m",1.0);}
+	// mutation probability per site per generation
+	if (!exists("mut_rate")) {defineConstant("mut_rate",3*1e-7);}
+	// selection loci appearance probability
+	if (!exists("a")) {defineConstant("a",2*1e-5);}
+	// selection intensity, this is the paramemter of an exponential distribution
+	if (!exists("s_pos")) {defineConstant("s_pos",0.05);}
+	// selection intensity, this is the paramemter of an exponential distribution
+	if (!exists("s_neg")) {defineConstant("s_neg",0.05);}
+	// selection switching scale for recurrent sweeps in generations
+	if (!exists("selection_switching_scale")) {defineConstant("selection_switching_scale",500);}
+	// the probability of being removed once a selection-switching event happens
+	if (!exists("remove_probability")) {defineConstant("remove_probability",1.0);}
+	// number of focal populations, has to be an even number >=4 !
+	if (!exists("FocalPopulationNumber")) {defineConstant("FocalPopulationNumber",10);}
+	
+	// seed used to run the model
+	if (!exists("simID")) {defineConstant("simID",getSeed());}
+	// number of generations between two treeseq simplification events
+	if (!exists("simplificationCycle")) {defineConstant("simplificationCycle",100);}
+	// number of generations between two output events
+	if (!exists("outputCycle")) {defineConstant("outputCycle",50);}
+	
+	// initialize recombination rates
+	rates=c();
+	for (i in 1:(n_chr-1)){rates=c(rates,1/L_chr,0.5);}
+	rates=c(rates,1/L_chr);
+	
+	// initialize chromosomes
+	ends=c();
+	for (i in 1:(n_chr-1)){ends=c(ends,(i*L_chr)-1,i*L_chr);}
+	ends=c(ends,n_chr*L_chr);
+	
+	initializeRecombinationRate(rates,ends);
+	
+	initializeMutationRate(0.0);
+	
+	initializeMutationType("m1", 0.5, "f", 0.0); // neutral mutations
+	initializeMutationType("m2", 0.5, "f", 0.0); // deleterious mutations in sp2
+	m1.color = "yellow";
+	m2.color = "red";
+	m1.convertToSubstitution = F;
+	m2.convertToSubstitution = F;
+	initializeGenomicElementType("g1", m1, 1.0);
+	initializeGenomicElement(g1, 0, L-1);
+	
+	
+	//	initializeTreeSeq;
+	initializeTreeSeq(simplificationRatio=INF);
+
+}
+
+// reproduction rules (monoecious individuals)
+reproduction() {
+	
+	for (pop in sim.subpopulations) {
+		// reproduction rules for the species across populations
+		if (pop.individualCount >= 1) {
+			
+			// return the offspring numbers
+			n_offsprings = rpois(1,pop.individualCount * lambda);
+			
+			if (n_offsprings >= 1) {
+				mate1 = pop.sampleIndividuals(n_offsprings,replace = T);
+				mate2 = pop.sampleIndividuals(n_offsprings,replace = T);
+				for (i in 0:(n_offsprings-1)){
+					pop.addCrossed(mate1[i],mate2[i]);
+				}
+			}
+		
+		}
+	}
+	
+	// disable this callback for this generation
+	self.active = 0;
+}
+
+
+function (void)execute_migration(integer$ form){
+
+	// form == 0 > only migration between p1 and p2 (cannot access other populations)	
+	// form == 1 > isolated sp1 and sp2, but they are connected to their own species' populations
+	// form == 2 > connected sp1 and sp2, and they are connected to their own species' populations
+	
+	if (form == 1){
+		
+		nfp = sim.getValue("focalpopCount");
+		
+		// create migration
+		// index for the populations belonging to different species 0-based
+		pop_index_sp1 = 2*(0:(nfp/2-1));
+		pop_index_sp2 = 2*(0:(nfp/2-1))+1;
+		
+		// migrate the first species
+		Migrants = c(); //array of every migrants
+		Dests = c(); //array of destinations for each migrant
+		
+		for (i in pop_index_sp1) {
+			//sample migrants from each population
+			nIndividuals = sim.subpopulations[i].individualCount;
+			nMigrants = nIndividuals >= 1 ? rbinom(1, sim.subpopulations[i].individualCount, m) else 0;
+			migrants = nMigrants >= 1 ? sample(sim.subpopulations[i].individuals, nMigrants) else NULL;
+			Migrants = isNULL(migrants) ? Migrants else c(Migrants,migrants);
+			//sample destinations for each migrant
+			if (nMigrants >= 1) {
+				for (j in 1:nMigrants) {
+					dest = ((i==pop_index_sp1[0]) ? sample(c(pop_index_sp1[0],pop_index_sp1[1]),1) else ((i==pop_index_sp1[size(pop_index_sp1)-1]) ? sample(c(pop_index_sp1[size(pop_index_sp1)-1],pop_index_sp1[size(pop_index_sp1)-2]),1) else sample(c(i+2,i-2),1)));
+					Dests = c(Dests,dest);
+				}
+			}
+		}
+		
+		if (size(Dests)>=1) {
+			//print(Migrants);
+			//print(Dests+1);
+			for (i in 0:(size(Dests)-1)) {
+				sim.subpopulations[Dests[i]].takeMigrants(Migrants[i]);
+			}
+		}
+		
+		// migrate the second species
+		Migrants = c(); //array of every migrants
+		Dests = c(); //array of destinations for each migrant
+		
+		for (i in pop_index_sp2) {
+			//sample migrants from each population
+			nIndividuals = sim.subpopulations[i].individualCount;
+			nMigrants = nIndividuals >= 1 ? rbinom(1, sim.subpopulations[i].individualCount, m) else 0;
+			migrants = nMigrants >= 1 ? sample(sim.subpopulations[i].individuals, nMigrants) else NULL;
+			Migrants = isNULL(migrants) ? Migrants else c(Migrants,migrants);
+			//sample destinations for each migrant
+			if (nMigrants >= 1) {
+				for (j in 1:nMigrants) {
+					dest = ((i==pop_index_sp2[0]) ? sample(c(pop_index_sp2[0],pop_index_sp2[1]),1) else ((i==pop_index_sp2[size(pop_index_sp1)-1]) ? sample(c(pop_index_sp2[size(pop_index_sp1)-1],pop_index_sp2[size(pop_index_sp1)-2]),1) else sample(c(i+2,i-2),1)));
+					Dests = c(Dests,dest);
+				}
+			}
+		}
+		
+		if (size(Dests)>=1) {
+			//print(Migrants);
+			//print(Dests+1);
+			for (i in 0:(size(Dests)-1)) {
+				sim.subpopulations[Dests[i]].takeMigrants(Migrants[i]);
+			}
+		}
+	}
+	else {
+		if (form == 2){
+			nfp = sim.getValue("focalpopCount");
+			
+			// create migration
+			// index for the populations belonging to different species 0-based
+			pop_index_sp1 = 2*(0:(nfp/2-1));
+			pop_index_sp2 = 2*(0:(nfp/2-1))+1;
+			
+			Migrants = c(); //array of every migrants
+			Dests = c(); //array of destinations for each migrant
+			
+			// migrate the first species
+			for (i in pop_index_sp1) {
+				//sample migrants from each population
+				nIndividuals = sim.subpopulations[i].individualCount;
+				nMigrants = nIndividuals >= 1 ? rbinom(1, sim.subpopulations[i].individualCount, m) else 0;
+				migrants = nMigrants >= 1 ? sample(sim.subpopulations[i].individuals, nMigrants) else NULL;
+				Migrants = isNULL(migrants) ? Migrants else c(Migrants,migrants);
+				//sample destinations for each migrant
+				if (nMigrants >= 1) {
+					for (j in 1:nMigrants) {
+						dest = ((i==pop_index_sp1[0]) ? sample(c(pop_index_sp2[0],pop_index_sp1[1]),1) else ((i==pop_index_sp1[size(pop_index_sp1)-1]) ? sample(c(pop_index_sp1[size(pop_index_sp1)-1],pop_index_sp1[size(pop_index_sp1)-2]),1) else sample(c(i+2,i-2),1)));
+						Dests = c(Dests,dest);
+					}
+				}
+			}
+	
+			
+			// migrate the second species
+			
+			for (i in pop_index_sp2) {
+				//sample migrants from each population
+				nIndividuals = sim.subpopulations[i].individualCount;
+				nMigrants = nIndividuals >= 1 ? rbinom(1, sim.subpopulations[i].individualCount, m) else 0;
+				migrants = nMigrants >= 1 ? sample(sim.subpopulations[i].individuals, nMigrants) else NULL;
+				Migrants = isNULL(migrants) ? Migrants else c(Migrants,migrants);
+				//sample destinations for each migrant
+				if (nMigrants >= 1) {
+					for (j in 1:nMigrants) {
+						dest = ((i==pop_index_sp2[0]) ? sample(c(pop_index_sp1[0],pop_index_sp2[1]),1) else ((i==pop_index_sp2[size(pop_index_sp1)-1]) ? sample(c(pop_index_sp2[size(pop_index_sp1)-1],pop_index_sp2[size(pop_index_sp1)-2]),1) else sample(c(i+2,i-2),1)));
+						Dests = c(Dests,dest);
+					}
+				}
+			}
+			
+			if (size(Dests)>=1) {
+				//print(Migrants);
+				//print(Dests+1);
+				for (i in 0:(size(Dests)-1)) {
+					sim.subpopulations[Dests[i]].takeMigrants(Migrants[i]);
+				}
+			}
+		}
+		else {
+		if (form == 0){
+			// create random migration
+			// index for the populations belonging to different species 0-based
+			pop_index_sp1 = c(0);
+			pop_index_sp2 = c(1);
+			
+			Migrants = c(); //array of every migrants
+			Dests = c(); //array of destinations for each migrant
+			
+			// migrate the first species
+			for (i in pop_index_sp1) {
+				//sample migrants from each population
+				nIndividuals = sim.subpopulations[i].individualCount;
+				nMigrants = nIndividuals >= 1 ? rbinom(1, sim.subpopulations[i].individualCount, 0.5) else 0;
+				migrants = nMigrants >= 1 ? sample(sim.subpopulations[i].individuals, nMigrants) else NULL;
+				Migrants = isNULL(migrants) ? Migrants else c(Migrants,migrants);
+				//sample destinations for each migrant
+				if (nMigrants >= 1) {
+					for (j in 1:nMigrants) {
+						dest = 1;
+						Dests = c(Dests,dest);
+					}
+				}
+			}
+			
+			// migrate the second species
+            
+			for (i in pop_index_sp2) {
+				//sample migrants from each population
+				nIndividuals = sim.subpopulations[i].individualCount;
+				nMigrants = nIndividuals >= 1 ? rbinom(1, sim.subpopulations[i].individualCount, 0.5) else 0;
+				migrants = nMigrants >= 1 ? sample(sim.subpopulations[i].individuals, nMigrants) else NULL;
+				Migrants = isNULL(migrants) ? Migrants else c(Migrants,migrants);
+				//sample destinations for each migrant
+				if (nMigrants >= 1) {
+					for (j in 1:nMigrants) {
+						dest = 0;
+						Dests = c(Dests,dest);
+					}
+				}
+			}
+			
+			if (size(Dests)>=1) {
+				//print(Migrants);
+				//print(Dests+1);
+				for (i in 0:(size(Dests)-1)) {
+					sim.subpopulations[Dests[i]].takeMigrants(Migrants[i]);
+				}
+			}
+		}
+	}
+	}
+	
+
+}
+
+function (void)calculate_fitness(integer$ form){
+	
+	nfp = sim.getValue("focalpopCount");
+	gen = sim.generation;
+
+		
+	// ===========calculate fitness among children for divergently selected loci
+	
+	S = sim.getValue("S");
+	
+	m2_mutations = sim.getValue("m2_mutations");
+	
+	if (form == 0) {
+	for (i in 1:nfp) {
+		pop = sim.subpopulations[i-1];
+		children = pop.individuals;
+		// density-dependent viability selection
+		densityS = pop.individualCount/K;
+		children.fitnessScaling = exp(-densityS);
+	}
+	} else {
+	if (form == 1){
+	for (i in 1:nfp) {
+		pop = sim.subpopulations[i-1];
+		children = pop.individuals;
+		// density-dependent viability selection
+		densityS = pop.individualCount/K;
+		if (i%2 == 1) {
+			for (child in children) {
+				n_maladaptives = 2 - child.genomes.mutationCountsInGenomes(mutations=m2_mutations);
+				child.fitnessScaling = exp(-sum(n_maladaptives * S)-densityS);
+			}
+		}
+		if (i%2 == 0) {
+			for (child in children) {
+				n_maladaptives = child.genomes.mutationCountsInGenomes(mutations=m2_mutations);
+				child.fitnessScaling = exp(-sum(n_maladaptives * S)-densityS);
+			}
+		}
+	}
+	}
+	}
+	
+}
+
+function (void)execute_mutation(void){
+	
+	nfp = sim.getValue("focalpopCount");
+	
+	// add mutation m2 to all p1,3,5... individuals, those are locally adaptive to sp1's environment
+	
+	n_selected_all = 0;
+	pos_selected_all = c();
+	m2_mutations = c();
+	genomes_all = c();
+	
+	for (i in (2*(0:(nfp/2-1)))){
+		children = sim.subpopulations[i].individuals;
+		genomes_mutating = children.genomes;
+		genomes_all = c(genomes_all,genomes_mutating);
+	}
+	
+	for (chr in 1:n_chr){
+		
+//		do {n_selected = rbinom(1,1e6,a*(chr/n_chr)^2);}
+//		while (n_selected == 0);
+		n_selected = rbinom(1,1e6,a*(chr/n_chr)^6);
+		pos_selected = runif(n_selected,(chr-1)*1e6,(chr)*1e6-1);
+		
+		for (i in pos_selected) {
+			mut_new = genomes_all.addNewDrawnMutation(m2,asInteger(i));
+			m2_mutations = c(m2_mutations,mut_new);
+		}
+		
+		n_selected_all = n_selected_all + n_selected;
+		pos_selected_all = c(pos_selected_all,pos_selected);
+	}
+	
+	// generate selection coefficients
+	S = rexp(n_selected_all,s_neg);
+	sim.setValue("S",S);
+	sim.setValue("pos_selected_all",pos_selected_all);
+	sim.setValue("m2_mutations",m2_mutations);
+}
+
+// create the population
+1 early() {
+	
+	// add focal species
+	sim.setValue("focalpopCount", FocalPopulationNumber);
+	
+	nfp = sim.getValue("focalpopCount");
+	for (i in 1:2) {
+		sim.addSubpop(i,asInteger(log(lambda)*K));
+	}
+	for (i in 3:nfp) {
+		sim.addSubpop(i,0);
+	}
+	sim.addSubpop(nfp+1,0);//garbage collector
+	
+	//	sim.readFromPopulationFile(dir_source + "/" + treeSeqFileName); //use a pre-eixsting population profile
+	
+	//	sim.treeSeqRememberIndividuals(sim.subpopulations.individuals);
+	
+	//	logcontent = paste(asString(S));
+	//	writeFile(dir + "/slim_seed" + simID + "_modelspec.txt", "Selection coefficients:",append=T);
+	//	writeFile(dir + "/slim_seed" + simID + "_modelspec.txt", logcontent,append=T);
+}
+
+2:40000 early() {
+	
+	nfp = sim.getValue("focalpopCount");
+	
+	for (i in 1:nfp){
+		sim.subpopulations[nfp].takeMigrants(sim.subpopulations[i-1].subsetIndividuals(minAge=1));
+	}
+    
+    muts = c(sim.mutationsOfType(m1),sim.mutationsOfType(m2));
+	if (length(muts)>0){
+		for (mut in muts) {mut.setMutationType(m3);}
+	}
+		
+	calculate_fitness(0);
+	
+	// set the fitness of individuals from the last generation to 0
+	sim.subpopulations[nfp].individuals.fitnessScaling = 0.0;
+
+}
+
+40001 early() {
+	
+	nfp = sim.getValue("focalpopCount");
+	
+	for (i in 1:nfp){
+		sim.subpopulations[nfp].takeMigrants(sim.subpopulations[i-1].subsetIndividuals(minAge=1));
+	}
+    
+    execute_mutation();
+		
+	calculate_fitness(1);
+	
+	// set the fitness of individuals from the last generation to 0
+	sim.subpopulations[nfp].individuals.fitnessScaling = 0.0;
+
+}
+
+40002: early() {
+	
+	nfp = sim.getValue("focalpopCount");
+	
+	for (i in 1:nfp){
+		sim.subpopulations[nfp].takeMigrants(sim.subpopulations[i-1].subsetIndividuals(minAge=1));
+	}
+		
+	calculate_fitness(1);
+	
+	// set the fitness of individuals from the last generation to 0
+	sim.subpopulations[nfp].individuals.fitnessScaling = 0.0;
+
+}
+
+1:40000 late() {
+	
+	execute_migration(0);
+	
+	// determine whether to output the treesqeuence
+	if (sim.generation/simplificationCycle == ceil(sim.generation/simplificationCycle)) {
+				print("Current generation: "+asString(sim.generation));
+		sim.treeSeqSimplify();
+	}
+
+}
+
+40001:140000 late() {
+	
+	execute_migration(1);
+	
+	// determine whether to output the treesqeuence
+	if (sim.generation/simplificationCycle == ceil(sim.generation/simplificationCycle)) {
+				print("Current generation: "+asString(sim.generation));
+		sim.treeSeqSimplify();
+	}
+
+}
+
+140001: late() {
+	
+	execute_migration(2);
+	
+	// determine whether to simplify the treesqeuence
+	if (sim.generation/simplificationCycle == ceil(sim.generation/simplificationCycle)) {
+				print("Current generation: "+asString(sim.generation));
+		sim.treeSeqSimplify();
+	}
+	
+	if (any(sim.generation == (140000 + c(500,2500,5000,7500,10000,20000)))) {
+		sim.treeSeqOutput(dir + "/slim_seed" + simID + "_gen" + sim.generation + ".trees");
+	}
+}
+
+160001 late() {
+
+}
