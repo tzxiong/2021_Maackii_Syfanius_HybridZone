@@ -1,6 +1,16 @@
 
 # Description
 
+You need:
+
+[Python3](https://www.python.org/) to run ```.py``` scripts
+
+[Julia](https://julialang.org/) to run ```.jl``` scripts
+
+[SLiM](https://messerlab.org/slim/) to run simulation models in ```.txt```
+
+Bash to run ```.sh``` scripts
+
 ## Script for simulation in SLiM-3.6
 
 **Divergent selection:** ```steppingStone.secondaryContact.divergentSelection.txt```
