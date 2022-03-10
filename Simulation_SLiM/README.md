@@ -1,6 +1,8 @@
 
 # Description
 
+**This folder contains code for simulating ancestry in SLiM and estimating entropy across many repetitive runs**
+
 You need:
 
 [Python3](https://www.python.org/) to run ```.py``` scripts
