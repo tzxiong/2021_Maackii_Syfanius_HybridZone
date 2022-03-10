@@ -2,8 +2,8 @@
 
 Please see the following assumptions about each population structure:
 
-Symmetric migration model: two local populations, but migration rate is the same regardless of population sizes
+**Symmetric migration model:** two local populations, but migration rate is the same regardless of population sizes
 
-Conservative migration model: two local populations, and migration rate is adjusted by the ratio of population sizes
+**Conservative migration model:** two local populations, and migration rate is adjusted by the ratio of population sizes
 
-Stepping stone models: a one-dimensional array of local populations with equal migration rates
+**Stepping stone models:** a one-dimensional array of local populations with equal migration rates
