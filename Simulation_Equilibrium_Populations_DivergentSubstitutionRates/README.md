@@ -6,4 +6,4 @@ Please see the following assumptions about each population structure:
 
 **Conservative migration model:** two local populations, and migration rate is adjusted by the ratio of population sizes
 
-**Stepping stone models:** a one-dimensional array of local populations with equal migration rates
+**Stepping stone model:** a one-dimensional array of local populations with equal migration rates
